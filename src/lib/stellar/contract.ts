@@ -15,7 +15,7 @@
 
 import {
   Networks,
-  SorobanRpc,
+  rpc,
   Contract,
   TransactionBuilder,
   BASE_FEE,
@@ -34,10 +34,10 @@ const NETWORK_PASSPHRASE =
   NETWORK === 'mainnet' ? Networks.PUBLIC : Networks.TESTNET;
 
 // Singleton RPC client
-let rpcClient: SorobanRpc.Server;
-function getRpc(): SorobanRpc.Server {
+let rpcClient: rpc.Server;
+function getRpc(): rpc.Server {
   if (!rpcClient) {
-    rpcClient = new SorobanRpc.Server(RPC_URL, { allowHttp: true });
+    rpcClient = new rpc.Server(RPC_URL, { allowHttp: true });
   }
   return rpcClient;
 }
@@ -52,11 +52,11 @@ async function invokeContract(
   method: string,
   args: xdr.ScVal[],
 ): Promise<string> {
-  const rpc = getRpc();
+  const rpcClient = getRpc();
   const contract = new Contract(CONTRACT_ID);
 
   // Fetch the caller's account sequence number
-  const account = await rpc.getAccount(callerAddress);
+  const account = await rpcClient.getAccount(callerAddress);
 
   const tx = new TransactionBuilder(account, {
     fee: BASE_FEE,
@@ -67,19 +67,19 @@ async function invokeContract(
     .build();
 
   // Simulate to get resource footprint
-  const simulation = await rpc.simulateTransaction(tx);
-  if (SorobanRpc.Api.isSimulationError(simulation)) {
+  const simulation = await rpcClient.simulateTransaction(tx);
+  if (rpc.Api.isSimulationError(simulation)) {
     throw new Error(`Simulation error: ${simulation.error}`);
   }
 
   // Assemble the final transaction with the simulation resource data
-  const assembled = SorobanRpc.assembleTransaction(tx, simulation).build();
+  const assembled = rpc.assembleTransaction(tx, simulation).build();
 
   // Sign with Freighter
   const signedXdr = await signTx(assembled.toXDR(), NETWORK_PASSPHRASE);
 
   // Submit
-  const response = await rpc.sendTransaction(
+  const response = await rpcClient.sendTransaction(
     new (await import('@stellar/stellar-sdk')).Transaction(
       signedXdr,
       NETWORK_PASSPHRASE,
@@ -96,21 +96,21 @@ async function invokeContract(
 
 /** Poll the RPC until the transaction is confirmed or fails */
 async function waitForConfirmation(txHash: string): Promise<string> {
-  const rpc = getRpc();
+  const rpcClient = getRpc();
   let attempts = 0;
 
   while (attempts < 20) {
     await new Promise((r) => setTimeout(r, 2000));
-    const result = await rpc.getTransaction(txHash);
+    const result = await rpcClient.getTransaction(txHash);
 
-    if (result.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
+    if (result.status === rpc.Api.GetTransactionStatus.SUCCESS) {
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('chainsettle:transaction-complete'));
       }
       return txHash;
     }
 
-    if (result.status === SorobanRpc.Api.GetTransactionStatus.FAILED) {
+    if (result.status === rpc.Api.GetTransactionStatus.FAILED) {
       throw new Error(`Transaction failed: ${txHash}`);
     }
 
@@ -122,7 +122,7 @@ async function waitForConfirmation(txHash: string): Promise<string> {
 
 /** Read-only simulation — no signing, no submission */
 async function simulateCall(method: string, args: xdr.ScVal[]): Promise<any> {
-  const rpc = getRpc();
+  const rpcClient = getRpc();
   const contract = new Contract(CONTRACT_ID);
 
   // Use a dummy account for simulation
@@ -141,13 +141,13 @@ async function simulateCall(method: string, args: xdr.ScVal[]): Promise<any> {
     .setTimeout(30)
     .build();
 
-  const simulation = await rpc.simulateTransaction(tx);
+  const simulation = await rpcClient.simulateTransaction(tx);
 
-  if (SorobanRpc.Api.isSimulationError(simulation)) {
+  if (rpc.Api.isSimulationError(simulation)) {
     throw new Error(`Read error: ${simulation.error}`);
   }
 
-  if (SorobanRpc.Api.isSimulationSuccess(simulation) && simulation.result) {
+  if (rpc.Api.isSimulationSuccess(simulation) && simulation.result) {
     return scValToNative(simulation.result.retval);
   }
 
