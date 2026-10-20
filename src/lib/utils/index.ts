@@ -47,6 +47,30 @@ export function usdcToStroops(usdc: string): bigint {
   return BigInt(whole) * 10_000_000n + BigInt(paddedFraction);
 }
 
+/**
+ * Convert stroops to an exact USDC string for form inputs (no rounding,
+ * trailing zeros trimmed).
+ * @example stroopsToUsdcInput("50005000000") → "5000.5"
+ */
+export function stroopsToUsdcInput(stroops: string | bigint): string {
+  const value = BigInt(stroops);
+  const whole = value / 10_000_000n;
+  const fraction = (value % 10_000_000n).toString().padStart(7, '0').replace(/0+$/, '');
+  return fraction ? `${whole}.${fraction}` : whole.toString();
+}
+
+/**
+ * Link target for a milestone proof: IPFS CIDs go to a gateway, URLs are
+ * used as-is, and plain hashes (e.g. SHA-256 digests) have no link.
+ */
+export function proofHashHref(proofHash: string): string | null {
+  if (proofHash.startsWith('ipfs://')) {
+    return `https://ipfs.io/ipfs/${proofHash.replace('ipfs://', '')}`;
+  }
+  if (/^https?:\/\//i.test(proofHash)) return proofHash;
+  return null;
+}
+
 /** Format a date string to a readable format */
 export function formatDate(date: string | null): string {
   if (!date) return '—';

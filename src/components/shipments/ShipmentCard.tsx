@@ -2,7 +2,7 @@
 'use client';
 
 import Link from 'next/link';
-import { ArrowRight, Check } from 'lucide-react';
+import { ArrowRight, Check, Copy } from 'lucide-react';
 import {
   shipmentStatusBadge,
   stroopsToUsdc,
@@ -60,13 +60,23 @@ export function ShipmentCard({
             </div>
           </Link>
         </div>
-        <Link
-          href={`/dashboard/shipments/${shipment.id}`}
-          className="text-right"
-        >
-          <p className="text-sm font-semibold text-gray-900">${totalUsdc}</p>
-          <p className="text-xs text-gray-400">${releasedUsdc} released</p>
-        </Link>
+        <div className="flex items-start gap-2">
+          <Link
+            href={`/dashboard/shipments/${shipment.id}`}
+            className="text-right"
+          >
+            <p className="text-sm font-semibold text-gray-900">${totalUsdc}</p>
+            <p className="text-xs text-gray-400">${releasedUsdc} released</p>
+          </Link>
+          <Link
+            href={`/dashboard/shipments/create?from=${encodeURIComponent(shipment.id)}`}
+            aria-label={`Duplicate shipment ${shipment.id}`}
+            title="Duplicate shipment"
+            className="p-1.5 text-gray-400 hover:text-brand-600 rounded-lg hover:bg-brand-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
+          >
+            <Copy className="w-3.5 h-3.5" aria-hidden="true" />
+          </Link>
+        </div>
       </div>
 
       <Link href={`/dashboard/shipments/${shipment.id}`}>

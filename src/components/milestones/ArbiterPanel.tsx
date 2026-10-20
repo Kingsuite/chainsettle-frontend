@@ -4,14 +4,15 @@ import { useState } from 'react';
 import { AlertTriangle, ThumbsUp, ThumbsDown, Loader2 } from 'lucide-react';
 import { resolveDispute } from '@/lib/stellar/contract';
 import { useAuthStore } from '@/lib/hooks/use-auth-store';
-import { stroopsToUsdc } from '@/lib/utils';
+import { stroopsToUsdc, proofHashHref } from '@/lib/utils';
+import { parseContractError } from '@/lib/stellar/errors';
 import type { Shipment, Milestone } from '@/types';
 
 interface ArbiterPanelProps {
   milestone: Milestone;
   shipment: Shipment;
   onUpdate: () => void;
-  onError?: (msg: string) => void;
+  onError?: (err: unknown) => void;
 }
 
 export function ArbiterPanel({ milestone, shipment, onUpdate, onError }: ArbiterPanelProps) {
@@ -34,8 +35,9 @@ export function ArbiterPanel({ milestone, shipment, onUpdate, onError }: Arbiter
         approve,
       });
       onUpdate();
-    } catch (err: any) {
-      alert(err?.message ?? `Failed to ${action} milestone`);
+    } catch (err) {
+      if (onError) onError(err);
+      else alert(parseContractError(err).message);
     } finally {
       setLoading(null);
       setConfirmAction(null);
@@ -59,19 +61,21 @@ export function ArbiterPanel({ milestone, shipment, onUpdate, onError }: Arbiter
         {milestone.proofHash && (
           <p className="flex items-center gap-1 flex-wrap">
             <span className="font-medium">Proof:</span>
-            <a
-              href={
-                milestone.proofHash.startsWith('ipfs://')
-                  ? `https://ipfs.io/ipfs/${milestone.proofHash.replace('ipfs://', '')}`
-                  : milestone.proofHash
-              }
-              target="_blank"
-              rel="noreferrer"
-              className="font-mono text-amber-700 underline hover:text-amber-900 truncate max-w-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
-              aria-label="View proof hash (opens in new tab)"
-            >
-              {milestone.proofHash}
-            </a>
+            {proofHashHref(milestone.proofHash) ? (
+              <a
+                href={proofHashHref(milestone.proofHash)!}
+                target="_blank"
+                rel="noreferrer"
+                className="font-mono text-amber-700 underline hover:text-amber-900 truncate max-w-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                aria-label="View proof hash (opens in new tab)"
+              >
+                {milestone.proofHash}
+              </a>
+            ) : (
+              <span className="font-mono text-amber-700 truncate max-w-xs" title={milestone.proofHash}>
+                {milestone.proofHash}
+              </span>
+            )}
           </p>
         )}
         <p>
