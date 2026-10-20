@@ -32,9 +32,9 @@ import { ContractError, TxPendingError, parseContractError } from './errors';
 
 export { ContractError, TxPendingError } from './errors';
 
-const RPC_URL = process.env.NEXT_PUBLIC_STELLAR_RPC_URL!;
-const CONTRACT_ID = process.env.NEXT_PUBLIC_CONTRACT_ID!;
-const NETWORK = process.env.NEXT_PUBLIC_STELLAR_NETWORK ?? 'testnet';
+const RPC_URL = env.stellarRpcUrl;
+const CONTRACT_ID = env.contractId;
+const NETWORK = env.stellarNetwork;
 
 const NETWORK_PASSPHRASE =
   NETWORK === 'mainnet' ? Networks.PUBLIC : Networks.TESTNET;

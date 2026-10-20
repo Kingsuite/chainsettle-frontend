@@ -112,6 +112,9 @@ function MilestoneRow({
   const milestoneUsdc = ((totalUsdc * percent) / 100).toFixed(2);
 
   const isActive = shipment.status === 'Active';
+  const proofUrl = milestone.proofHash
+    ? toSafeProofUrl(milestone.proofHash, env.ipfsGateway)
+    : null;
 
   const statusIcon: Record<MilestoneStatus, JSX.Element> = {
     Pending:        <Clock className="w-4 h-4 text-gray-400" />,

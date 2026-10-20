@@ -1,11 +1,7 @@
 import { Horizon } from '@stellar/stellar-sdk';
+import { env } from '@/lib/env';
 
-const NETWORK = process.env.NEXT_PUBLIC_STELLAR_NETWORK ?? 'testnet';
-export const HORIZON_URL =
-  process.env.NEXT_PUBLIC_HORIZON_URL ??
-  (NETWORK === 'mainnet'
-    ? 'https://horizon.stellar.org'
-    : 'https://horizon-testnet.stellar.org');
+export const HORIZON_URL = env.horizonUrl;
 const USDC_CODE = 'USDC';
 
 export interface WalletBalances {

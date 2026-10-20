@@ -5,16 +5,33 @@ import { useParams } from 'next/navigation';
 import { ArrowLeft, RefreshCw, Loader2, Printer, XCircle, Copy } from 'lucide-react';
 import Link from 'next/link';
 import { shipmentsApi } from '@/lib/api/services';
+import { cancelShipment } from '@/lib/stellar/contract';
 import { useAuthStore } from '@/lib/hooks/use-auth-store';
 import { MilestoneTimeline } from '@/components/milestones/MilestoneTimeline';
 import { ShipmentMeta } from '@/components/shipments/ShipmentMeta';
 import { ShipmentProgress } from '@/components/shipments/ShipmentProgress';
 import { ShipmentComments } from '@/components/shipments/ShipmentComments';
 import { EscrowBalanceCard } from '@/components/shipments/EscrowBalanceCard';
-import { shipmentStatusBadge, timeAgo, deriveUserRole, roleBadge } from '@/lib/utils';
+import { shipmentStatusBadge, timeAgo, deriveUserRole, roleBadge, stroopsToUsdc } from '@/lib/utils';
 import type { Shipment } from '@/types';
 
 const POLL_INTERVAL_MS = 15_000;
+
+/** Freighter surfaces a declined signature as an error, e.g. "Freighter: The user rejected this request." */
+function isWalletRejection(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err ?? '');
+  return /reject|declin|denied|cancell?ed by (the )?user/i.test(message);
+}
+
+/** Remaining escrow (total - released) formatted as USDC; never NaN */
+function remainingEscrowUsdc(shipment: Shipment): string {
+  try {
+    const remaining = BigInt(shipment.totalAmount) - BigInt(shipment.releasedAmount);
+    return stroopsToUsdc(remaining > 0n ? remaining : 0n);
+  } catch {
+    return stroopsToUsdc(0n);
+  }
+}
 
 export default function ShipmentDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -26,7 +43,8 @@ export default function ShipmentDetailPage() {
   const [secondsAgo, setSecondsAgo] = useState(0);
   const [balanceRefreshKey, setBalanceRefreshKey] = useState(0);
   const [showCancelModal, setShowCancelModal] = useState(false);
-  const [cancelling, setCancelling] = useState(false);
+  const [cancelStep, setCancelStep] = useState<'signing' | 'syncing' | null>(null);
+  const [cancelError, setCancelError] = useState<string | null>(null);
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const loadingRef = useRef<HTMLDivElement>(null);
@@ -105,22 +123,48 @@ export default function ShipmentDetailPage() {
     setBalanceRefreshKey((k) => k + 1);
   };
 
+  const openCancelModal = () => {
+    setCancelError(null);
+    setShowCancelModal(true);
+  };
+
   const handleConfirmCancel = async () => {
-    setCancelling(true);
+    if (cancelStep) return;
+    if (!address) {
+      setCancelError('Connect your Freighter wallet to cancel this shipment.');
+      return;
+    }
+    setCancelError(null);
+    setCancelStep('signing');
     try {
-      await shipmentsApi.cancelShipment(id);
-      setShowCancelModal(false);
-      setToast({ type: 'success', message: 'Shipment cancelled successfully.' });
-      await shipmentsApi.sync(id);
-      await fetchShipment(true);
-      setBalanceRefreshKey((k) => k + 1);
+      // Sign and submit cancel_shipment via Freighter; resolves once confirmed on-chain
+      await cancelShipment({ callerAddress: address, shipmentId: id });
     } catch (err) {
       console.error(err);
-      setShowCancelModal(false);
-      setToast({ type: 'error', message: 'Failed to cancel shipment. Please try again.' });
-    } finally {
-      setCancelling(false);
+      setCancelStep(null);
+      if (isWalletRejection(err)) {
+        setCancelError('Transaction rejected in Freighter. The shipment was not cancelled.');
+      } else {
+        const detail = err instanceof Error ? err.message : null;
+        setCancelError(
+          `Failed to cancel shipment on-chain${detail ? `: ${detail}` : '.'} Please try again.`,
+        );
+      }
+      return;
     }
+
+    setCancelStep('syncing');
+    try {
+      await shipmentsApi.sync(id);
+    } catch (err) {
+      // The on-chain cancellation already succeeded; the backend will catch up on the next sync
+      console.error(err);
+    }
+    await fetchShipment(true);
+    setBalanceRefreshKey((k) => k + 1);
+    setCancelStep(null);
+    setShowCancelModal(false);
+    setToast({ type: 'success', message: 'Shipment cancelled and escrow refunded.' });
   };
 
   if (loading) {
@@ -157,7 +201,8 @@ export default function ShipmentDetailPage() {
     ? `Cannot cancel while a milestone is ${blockingMilestone.status}.`
     : null;
   const canCancel = isBuyer && isActive && !cancelDisabledReason;
-  const refundAmount = shipment.totalAmount - shipment.releasedAmount;
+  const refundAmount = remainingEscrowUsdc(shipment);
+  const cancelling = cancelStep !== null;
 
   return (
     <div>
@@ -211,7 +256,7 @@ export default function ShipmentDetailPage() {
           </Link>
           {isBuyer && isActive && (
             <button
-              onClick={() => setShowCancelModal(true)}
+              onClick={openCancelModal}
               disabled={!canCancel}
               title={cancelDisabledReason ?? 'Cancel this shipment and refund the remaining escrow'}
               aria-label="Cancel shipment"
@@ -293,11 +338,21 @@ export default function ShipmentDetailPage() {
               <div className="flex items-center justify-between">
                 <span className="text-gray-500">Refund amount</span>
                 <span className="font-semibold text-gray-900">
-                  {refundAmount} {shipment.currency}
+                  {refundAmount} USDC
                 </span>
               </div>
             </div>
-            <div className="mt-5 flex justify-end gap-2">
+            {cancelError && (
+              <p className="mt-3 text-sm text-red-600" role="alert">
+                {cancelError}
+              </p>
+            )}
+            <div className="mt-5 flex items-center justify-end gap-2">
+              {cancelStep && (
+                <span className="mr-auto text-xs text-gray-500" aria-live="polite">
+                  {cancelStep === 'signing' ? 'Waiting for Freighter…' : 'Syncing shipment…'}
+                </span>
+              )}
               <button
                 onClick={() => setShowCancelModal(false)}
                 disabled={cancelling}

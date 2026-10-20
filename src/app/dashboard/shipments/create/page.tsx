@@ -17,7 +17,7 @@ import { SaveTemplateDialog } from '@/components/templates/SaveTemplateDialog';
 import { TransactionError, isTxPending } from '@/components/TransactionError';
 import type { CreateMilestoneInput } from '@/types';
 
-const USDC_ADDRESS = process.env.NEXT_PUBLIC_USDC_ADDRESS!;
+const USDC_ADDRESS = env.usdcAddress;
 const HIGH_VALUE_THRESHOLD_USDC = 10_000;
 const DEFAULT_MILESTONES: CreateMilestoneInput[] = [
   { name: 'Goods Dispatched', paymentPercent: 25 },
@@ -44,7 +44,7 @@ const generateInputId = (suffix: string) => `create-${suffix}`;
 type EditableParty = Exclude<PartyRole, 'buyer'>;
 
 const NETWORK_LABEL =
-  process.env.NEXT_PUBLIC_STELLAR_NETWORK === 'mainnet' ? 'Mainnet' : 'Testnet';
+  env.stellarNetwork === 'mainnet' ? 'Mainnet' : 'Testnet';
 
 type AddressFieldProps = {
   role: EditableParty;
@@ -701,7 +701,7 @@ function CreateShipmentPageContent() {
               <strong className="text-gray-900">{totalUsdc} USDC</strong> in
               escrow on{" "}
               <strong className="text-gray-900">
-                {process.env.NEXT_PUBLIC_STELLAR_NETWORK === "mainnet"
+                {env.stellarNetwork === "mainnet"
                   ? "Mainnet"
                   : "Testnet"}
               </strong>
