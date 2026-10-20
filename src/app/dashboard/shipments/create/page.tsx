@@ -1,20 +1,20 @@
 "use client";
 
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { ArrowLeft, Plus, Trash2, Loader2, AlertCircle, AlertTriangle, BookmarkPlus, CheckCircle2 } from 'lucide-react';
+import { Suspense, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { ArrowLeft, Plus, Trash2, Loader2, AlertCircle, AlertTriangle, BookmarkPlus, CheckCircle2, Copy, X } from 'lucide-react';
 import Link from 'next/link';
 import { createShipment } from '@/lib/stellar/contract';
 import { shipmentsApi } from '@/lib/api/services';
 import { useAuthStore } from '@/lib/hooks/use-auth-store';
 import { useAccountExistence } from '@/lib/hooks/use-account-existence';
 import { normalizeAddress, validateParties, PARTY_ROLE_LABELS, type PartyRole } from '@/lib/stellar/address';
-import { generateShipmentId, usdcToStroops } from '@/lib/utils';
+import { deriveUserRole, generateShipmentId, stroopsToUsdcInput, usdcToStroops } from '@/lib/utils';
 import { useShipmentTemplates, useTemplatesStore } from '@/lib/hooks/use-templates-store';
 import { cloneMilestones, isSavableSplit, type ShipmentTemplate } from '@/lib/templates';
 import { TemplatePicker } from '@/components/templates/TemplatePicker';
 import { SaveTemplateDialog } from '@/components/templates/SaveTemplateDialog';
-import { env } from '@/lib/env';
+import { TransactionError, isTxPending } from '@/components/TransactionError';
 import type { CreateMilestoneInput } from '@/types';
 
 const USDC_ADDRESS = env.usdcAddress;
@@ -24,6 +24,11 @@ const DEFAULT_MILESTONES: CreateMilestoneInput[] = [
   { name: 'In Transit', paymentPercent: 50 },
   { name: 'Delivered', paymentPercent: 25 },
 ];
+
+type PrefillState = {
+  status: 'loading' | 'loaded' | 'error';
+  sourceId: string;
+};
 
 type ShipmentDraft = {
   shipmentId: string;
@@ -105,8 +110,10 @@ function AddressField({ role, label, value, onChange, onBlur, error, touched, hi
   );
 }
 
-export default function CreateShipmentPage() {
+function CreateShipmentPageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const duplicateFrom = searchParams?.get('from') ?? '';
   const { address } = useAuthStore();
   const errorId = useId();
   const txStepId = useId();
@@ -120,7 +127,7 @@ export default function CreateShipmentPage() {
   const [totalUsdc, setTotalUsdc] = useState('');
   const [milestones, setMilestones] = useState<CreateMilestoneInput[]>(DEFAULT_MILESTONES);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [txStep, setTxStep] = useState('');
   const [touched, setTouched] = useState<Record<EditableParty, boolean>>({
     supplier: false,
@@ -131,6 +138,8 @@ export default function CreateShipmentPage() {
   const draftLoaded = useRef(false);
   const [saveTemplateOpen, setSaveTemplateOpen] = useState(false);
   const [templateNotice, setTemplateNotice] = useState<string | null>(null);
+  const [prefill, setPrefill] = useState<PrefillState | null>(null);
+  const prefillKey = useRef<string | null>(null);
   const { templates } = useShipmentTemplates(address);
   const saveTemplate = useTemplatesStore((state) => state.saveTemplate);
 
@@ -175,6 +184,62 @@ export default function CreateShipmentPage() {
 
     return () => window.clearTimeout(timeout);
   }, [address, shipmentId, supplierAddress, logisticsAddress, arbiterAddress, totalUsdc, milestones, loading]);
+
+  // "Duplicate shipment": prefill from ?from=<id>. Runs after the draft is
+  // restored, so the source shipment's values take precedence over the draft.
+  useEffect(() => {
+    if (!address || !duplicateFrom) return;
+    const key = `${address}:${duplicateFrom}`;
+    if (prefillKey.current === key) return;
+    prefillKey.current = key;
+
+    let cancelled = false;
+    setPrefill({ status: 'loading', sourceId: duplicateFrom });
+
+    shipmentsApi
+      .get(duplicateFrom)
+      .then((source) => {
+        if (cancelled) return;
+        if (!source || deriveUserRole(address, source) === 'observer') {
+          throw new Error('Shipment is not accessible');
+        }
+
+        // Always a fresh ID — never reuse the source shipment's ID
+        let freshId = generateShipmentId();
+        while (freshId === source.id) freshId = generateShipmentId();
+        setShipmentId(freshId);
+
+        setSupplierAddress(normalizeAddress(source.supplierAddress ?? ''));
+        setLogisticsAddress(normalizeAddress(source.logisticsAddress ?? ''));
+        setArbiterAddress(normalizeAddress(source.arbiterAddress ?? ''));
+        setTotalUsdc(stroopsToUsdcInput(source.totalAmount));
+        const sourceMilestones = [...(source.milestones ?? [])]
+          .sort((a, b) => a.milestoneIndex - b.milestoneIndex)
+          .map((m) => ({ name: m.name, paymentPercent: m.paymentPercent }));
+        setMilestones(sourceMilestones.length ? sourceMilestones : DEFAULT_MILESTONES);
+        // Surface any validation problems with the copied addresses right away
+        setTouched({ supplier: true, logistics: true, arbiter: true });
+        setPrefill({ status: 'loaded', sourceId: source.id });
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.error(err);
+        // Fall back to an empty form
+        setShipmentId(generateShipmentId());
+        setSupplierAddress('');
+        setLogisticsAddress('');
+        setArbiterAddress('');
+        setTotalUsdc('');
+        setMilestones(DEFAULT_MILESTONES);
+        setTouched({ supplier: false, logistics: false, arbiter: false });
+        setPrefill({ status: 'error', sourceId: duplicateFrom });
+      });
+
+    return () => {
+      cancelled = true;
+      prefillKey.current = null;
+    };
+  }, [address, duplicateFrom]);
 
   const totalPercent = milestones.reduce((s, m) => s + m.paymentPercent, 0);
   const percentValid = totalPercent === 100;
@@ -224,7 +289,7 @@ export default function CreateShipmentPage() {
   const summaryErrors = submitAttempted
     ? (Object.entries(partyErrors) as [PartyRole, string][])
     : [];
-  const showErrorBanner = Boolean(error) || summaryErrors.length > 0;
+  const showErrorBanner = error != null || summaryErrors.length > 0;
 
   const markTouched = (role: EditableParty) =>
     setTouched((prev) => (prev[role] ? prev : { ...prev, [role]: true }));
@@ -281,8 +346,8 @@ export default function CreateShipmentPage() {
 
       localStorage.removeItem(`chainsetttle_shipment_draft_${address}`);
       router.push(`/dashboard/shipments/${shipmentId}`);
-    } catch (err: any) {
-      setError(err?.message ?? "Transaction failed. Please try again.");
+    } catch (err) {
+      setError(err);
     } finally {
       setLoading(false);
       setTxStep("");
@@ -326,11 +391,63 @@ export default function CreateShipmentPage() {
       </p>
       <p className="text-xs text-gray-400 mb-5">Your unfinished form is saved locally in this browser.</p>
 
-      {showErrorBanner && (
-        <div id={errorId} ref={errorRef} tabIndex={-1} className="mb-5 p-4 rounded-xl bg-red-50 border border-red-100 flex gap-3" role="alert" aria-live="assertive">
+      {prefill?.status === 'loading' && (
+        <p className="mb-5 flex items-center gap-2 text-sm text-gray-500" role="status" aria-live="polite">
+          <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+          Loading shipment <span className="font-mono">{prefill.sourceId}</span> to duplicate…
+        </p>
+      )}
+
+      {prefill?.status === 'loaded' && (
+        <div className="mb-5 p-3 rounded-xl bg-brand-50 border border-brand-100 flex items-start gap-3" role="status" aria-live="polite">
+          <Copy className="w-4 h-4 text-brand-600 flex-shrink-0 mt-0.5" aria-hidden="true" />
+          <p className="flex-1 text-sm text-brand-800">
+            Prefilled from shipment <span className="font-mono">{prefill.sourceId}</span>. A new shipment ID
+            has been generated — review every field before signing.
+          </p>
+          <button
+            type="button"
+            onClick={() => setPrefill(null)}
+            aria-label="Dismiss prefill notice"
+            className="p-1 text-brand-600 hover:text-brand-800 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+          >
+            <X className="w-3.5 h-3.5" aria-hidden="true" />
+          </button>
+        </div>
+      )}
+
+      {prefill?.status === 'error' && (
+        <div className="mb-5 p-3 rounded-xl bg-red-50 border border-red-100 flex items-start gap-3" role="alert">
           <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" aria-hidden="true" />
+          <p className="flex-1 text-sm text-red-700">
+            Could not load shipment <span className="font-mono">{prefill.sourceId}</span> to duplicate. It may not
+            exist or you may not have access to it. Starting with an empty form instead.
+          </p>
+          <button
+            type="button"
+            onClick={() => setPrefill(null)}
+            aria-label="Dismiss error"
+            className="p-1 text-red-500 hover:text-red-700 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+          >
+            <X className="w-3.5 h-3.5" aria-hidden="true" />
+          </button>
+        </div>
+      )}
+
+      {showErrorBanner && (
+        <div
+          id={errorId}
+          ref={errorRef}
+          tabIndex={-1}
+          className={`mb-5 p-4 rounded-xl flex gap-3 ${isTxPending(error) ? 'bg-amber-50 border border-amber-100' : 'bg-red-50 border border-red-100'}`}
+          role="alert"
+          aria-live="assertive"
+        >
+          {!isTxPending(error) && (
+            <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" aria-hidden="true" />
+          )}
           <div className="space-y-1">
-            {error && <p className="text-sm text-red-700">{error}</p>}
+            {error != null && <TransactionError error={error} fallback="Transaction failed. Please try again." />}
             {summaryErrors.length > 0 && (
               <>
                 <p className="text-sm font-medium text-red-700">
@@ -618,5 +735,13 @@ export default function CreateShipmentPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function CreateShipmentPage() {
+  return (
+    <Suspense fallback={<div className="h-64" />}>
+      <CreateShipmentPageContent />
+    </Suspense>
   );
 }
