@@ -10,6 +10,8 @@ import {
   ThumbsUp,
   XCircle,
   Loader2,
+  ShieldCheck,
+  X,
 } from 'lucide-react';
 import {
   submitProof,
@@ -17,8 +19,11 @@ import {
   raiseDispute,
 } from '@/lib/stellar/contract';
 import { ArbiterPanel } from './ArbiterPanel';
+import { ProofDocumentDropzone } from './ProofDocumentDropzone';
+import { TransactionError, isTxPending } from '@/components/TransactionError';
+import { normalizeProofHash } from '@/lib/proof-hash';
 import { useAuthStore } from '@/lib/hooks/use-auth-store';
-import { milestoneStatusBadge, milestoneStatusLabel, stroopsToUsdc, cn } from '@/lib/utils';
+import { milestoneStatusBadge, milestoneStatusLabel, stroopsToUsdc, proofHashHref, cn } from '@/lib/utils';
 import type { Shipment, Milestone, MilestoneStatus } from '@/types';
 
 interface Props {
@@ -29,7 +34,7 @@ interface Props {
 
 export function MilestoneTimeline({ shipment, userRole, onUpdate }: Props) {
   const t = useTranslations('milestones');
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const errorRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -46,12 +51,21 @@ export function MilestoneTimeline({ shipment, userRole, onUpdate }: Props) {
           userRole={userRole}
           onUpdate={onUpdate}
           isLast={i === shipment.milestones.length - 1}
-          onError={(msg) => setError(msg)}
+          onError={(err) => setError(err)}
         />
       ))}
-      {error && (
-        <div ref={errorRef} tabIndex={-1} className="p-4 bg-red-50 border-t border-red-100" role="alert" aria-live="assertive">
-          <p className="text-sm text-red-700">{error}</p>
+      {error != null && (
+        <div
+          ref={errorRef}
+          tabIndex={-1}
+          className={cn(
+            'p-4 border-t',
+            isTxPending(error) ? 'bg-amber-50 border-amber-100' : 'bg-red-50 border-red-100',
+          )}
+          role="alert"
+          aria-live="assertive"
+        >
+          <TransactionError error={error} fallback={t('transactionFailed')} />
         </div>
       )}
     </div>
@@ -80,13 +94,18 @@ function MilestoneRow({
   userRole: string;
   onUpdate: () => void;
   isLast: boolean;
-  onError: (msg: string) => void;
+  onError: (err: unknown) => void;
 }) {
   const t = useTranslations('milestones');
   const { address } = useAuthStore();
   const [loading, setLoading] = useState(false);
   const [proofInput, setProofInput] = useState('');
   const [showProofInput, setShowProofInput] = useState(false);
+  const [proofMode, setProofMode] = useState<'upload' | 'manual'>('upload');
+  const [showVerify, setShowVerify] = useState(false);
+  const [verifyResult, setVerifyResult] = useState<'match' | 'mismatch' | null>(null);
+  const tProof = useTranslations('proofDocument');
+  const tabsId = useId();
 
   const percent = milestone.paymentPercent;
   const totalUsdc = parseFloat(stroopsToUsdc(shipment.totalAmount));
@@ -108,8 +127,8 @@ function MilestoneRow({
     try {
       await fn();
       onUpdate();
-    } catch (err: any) {
-      onError(err?.message ?? t('transactionFailed'));
+    } catch (err) {
+      onError(err);
     } finally {
       setLoading(false);
     }
@@ -124,9 +143,19 @@ function MilestoneRow({
         milestoneIndex: milestone.milestoneIndex,
         proofHash: proofInput.trim(),
       });
-      setShowProofInput(false);
-      setProofInput('');
+      closeProofInput();
     });
+
+  const closeProofInput = () => {
+    setShowProofInput(false);
+    setProofInput('');
+    setProofMode('upload');
+  };
+
+  const closeVerify = () => {
+    setShowVerify(false);
+    setVerifyResult(null);
+  };
 
   const handleConfirm = () =>
     wrap(() =>
@@ -206,19 +235,72 @@ function MilestoneRow({
           {milestone.proofHash && (
             <div className="flex items-center gap-1.5 mb-2">
               <span className="text-xs text-gray-400">{t('proofLabel')}</span>
-              <a
-                href={
-                  milestone.proofHash.startsWith('ipfs://')
-                    ? `https://ipfs.io/ipfs/${milestone.proofHash.replace('ipfs://', '')}`
-                    : milestone.proofHash
+              {proofHashHref(milestone.proofHash) ? (
+                <a
+                  href={proofHashHref(milestone.proofHash)!}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-xs text-brand-600 hover:underline font-mono truncate max-w-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                  aria-label={t('viewProofAria')}
+                >
+                  {milestone.proofHash}
+                </a>
+              ) : (
+                <span className="text-xs text-gray-600 font-mono truncate max-w-xs" title={milestone.proofHash}>
+                  {milestone.proofHash}
+                </span>
+              )}
+              {!showVerify && (
+                <button
+                  type="button"
+                  onClick={() => setShowVerify(true)}
+                  className="btn-ghost text-xs px-2 py-0.5 flex items-center gap-1"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5" aria-hidden="true" />
+                  {tProof('verifyDocument')}
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Verify a document against the submitted proof */}
+          {milestone.proofHash && showVerify && (
+            <div className="mb-3 rounded-xl border border-gray-100 p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-medium text-gray-700">{tProof('verifyTitle')}</p>
+                <button
+                  type="button"
+                  onClick={closeVerify}
+                  aria-label={tProof('close')}
+                  className="p-1 text-gray-400 hover:text-gray-600 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                >
+                  <X className="w-3.5 h-3.5" aria-hidden="true" />
+                </button>
+              </div>
+              <ProofDocumentDropzone
+                ariaLabel={tProof('verifyDropzoneLabel')}
+                onHashed={({ hash }) =>
+                  setVerifyResult(
+                    hash === normalizeProofHash(milestone.proofHash ?? '') ? 'match' : 'mismatch',
+                  )
                 }
-                target="_blank"
-                rel="noreferrer"
-                className="text-xs text-brand-600 hover:underline font-mono truncate max-w-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
-                aria-label={t('viewProofAria')}
-              >
-                {milestone.proofHash}
-              </a>
+              />
+              {verifyResult && (
+                <p
+                  role="status"
+                  className={cn(
+                    'flex items-center gap-1.5 text-xs font-medium',
+                    verifyResult === 'match' ? 'text-green-700' : 'text-red-600',
+                  )}
+                >
+                  {verifyResult === 'match' ? (
+                    <CheckCircle2 className="w-3.5 h-3.5" aria-hidden="true" />
+                  ) : (
+                    <XCircle className="w-3.5 h-3.5" aria-hidden="true" />
+                  )}
+                  {tProof(verifyResult)}
+                </p>
+              )}
             </div>
           )}
 
@@ -242,31 +324,63 @@ function MilestoneRow({
             {canSubmitProof && !loading && (
               <>
                 {showProofInput ? (
-                  <div className="flex items-center gap-2 w-full">
-                    <input
-                      type="text"
-                      placeholder={t('proofPlaceholder')}
-                      value={proofInput}
-                      onChange={(e) => setProofInput(e.target.value)}
-                      className="input flex-1 text-sm"
-                      aria-label={t('proofInputAria')}
-                    />
-                    <button
-                      onClick={handleSubmitProof}
-                      disabled={loading}
-                      className="btn-primary text-xs px-3 py-1.5"
+                  <div className="w-full space-y-3">
+                    <div role="tablist" aria-label={tProof('proofMethod')} className="flex gap-1">
+                      {(['upload', 'manual'] as const).map((mode) => (
+                        <button
+                          key={mode}
+                          type="button"
+                          role="tab"
+                          id={`${tabsId}-${mode}-tab`}
+                          aria-selected={proofMode === mode}
+                          aria-controls={`${tabsId}-${mode}-panel`}
+                          onClick={() => setProofMode(mode)}
+                          className={cn(
+                            'rounded-full px-3 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500',
+                            proofMode === mode
+                              ? 'bg-slate-900 text-white'
+                              : 'bg-slate-100 text-slate-700 hover:bg-slate-200',
+                          )}
+                        >
+                          {mode === 'upload' ? tProof('uploadTab') : tProof('manualTab')}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div
+                      role="tabpanel"
+                      id={`${tabsId}-${proofMode}-panel`}
+                      aria-labelledby={`${tabsId}-${proofMode}-tab`}
                     >
-                      {t('submit')}
-                    </button>
-                    <button
-                      onClick={() => {
-                        setShowProofInput(false);
-                        setProofInput('');
-                      }}
-                      className="btn-secondary text-xs px-3 py-1.5"
-                    >
-                      {t('cancel')}
-                    </button>
+                      {proofMode === 'upload' ? (
+                        <ProofDocumentDropzone onHashed={({ hash }) => setProofInput(hash)} />
+                      ) : (
+                        <input
+                          type="text"
+                          placeholder={t('proofPlaceholder')}
+                          value={proofInput}
+                          onChange={(e) => setProofInput(e.target.value)}
+                          className="input w-full text-sm"
+                          aria-label={t('proofInputAria')}
+                        />
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={handleSubmitProof}
+                        disabled={loading || !proofInput.trim()}
+                        className="btn-primary text-xs px-3 py-1.5"
+                      >
+                        {t('submit')}
+                      </button>
+                      <button
+                        onClick={closeProofInput}
+                        className="btn-secondary text-xs px-3 py-1.5"
+                      >
+                        {t('cancel')}
+                      </button>
+                    </div>
                   </div>
                 ) : (
                   <button

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
-import { ArrowLeft, RefreshCw, Loader2, Printer, XCircle } from 'lucide-react';
+import { ArrowLeft, RefreshCw, Loader2, Printer, XCircle, Copy } from 'lucide-react';
 import Link from 'next/link';
 import { shipmentsApi } from '@/lib/api/services';
 import { useAuthStore } from '@/lib/hooks/use-auth-store';
@@ -201,6 +201,14 @@ export default function ShipmentDetailPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <Link
+            href={`/dashboard/shipments/create?from=${encodeURIComponent(shipment.id)}`}
+            title="Create a new shipment prefilled with this shipment's parties, amount and milestones"
+            className="btn-secondary text-xs"
+          >
+            <Copy className="w-3.5 h-3.5" aria-hidden="true" />
+            Duplicate
+          </Link>
           {isBuyer && isActive && (
             <button
               onClick={() => setShowCancelModal(true)}
