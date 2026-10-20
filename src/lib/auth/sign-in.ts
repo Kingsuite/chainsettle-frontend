@@ -9,6 +9,7 @@
 import { Networks } from '@stellar/stellar-sdk';
 import { connectFreighter, signNonce } from '@/lib/stellar/freighter';
 import { authApi } from '@/lib/api/services';
+import { env } from '@/lib/env';
 import type { User } from '@/types';
 
 export type SignInStep = 'connecting' | 'signing' | 'verifying';
@@ -28,7 +29,7 @@ export async function signInWithStellar(
 
   onStep?.('signing');
   const networkPassphrase =
-    process.env.NEXT_PUBLIC_STELLAR_NETWORK === 'mainnet' ? Networks.PUBLIC : Networks.TESTNET;
+    env.stellarNetwork === 'mainnet' ? Networks.PUBLIC : Networks.TESTNET;
   const signedNonce = await signNonce(nonce, networkPassphrase);
 
   onStep?.('verifying');

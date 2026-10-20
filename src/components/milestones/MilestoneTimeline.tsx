@@ -10,6 +10,7 @@ import {
   ThumbsUp,
   XCircle,
   Loader2,
+  Copy,
 } from 'lucide-react';
 import {
   submitProof,
@@ -18,7 +19,15 @@ import {
 } from '@/lib/stellar/contract';
 import { ArbiterPanel } from './ArbiterPanel';
 import { useAuthStore } from '@/lib/hooks/use-auth-store';
-import { milestoneStatusBadge, milestoneStatusLabel, stroopsToUsdc, cn } from '@/lib/utils';
+import {
+  milestoneStatusBadge,
+  milestoneStatusLabel,
+  stroopsToUsdc,
+  cn,
+  toSafeProofUrl,
+  copyToClipboard,
+} from '@/lib/utils';
+import { env } from '@/lib/env';
 import type { Shipment, Milestone, MilestoneStatus } from '@/types';
 
 interface Props {
@@ -93,6 +102,9 @@ function MilestoneRow({
   const milestoneUsdc = ((totalUsdc * percent) / 100).toFixed(2);
 
   const isActive = shipment.status === 'Active';
+  const proofUrl = milestone.proofHash
+    ? toSafeProofUrl(milestone.proofHash, env.ipfsGateway)
+    : null;
 
   const statusIcon: Record<MilestoneStatus, JSX.Element> = {
     Pending:        <Clock className="w-4 h-4 text-gray-400" />,
@@ -206,19 +218,30 @@ function MilestoneRow({
           {milestone.proofHash && (
             <div className="flex items-center gap-1.5 mb-2">
               <span className="text-xs text-gray-400">{t('proofLabel')}</span>
-              <a
-                href={
-                  milestone.proofHash.startsWith('ipfs://')
-                    ? `https://ipfs.io/ipfs/${milestone.proofHash.replace('ipfs://', '')}`
-                    : milestone.proofHash
-                }
-                target="_blank"
-                rel="noreferrer"
-                className="text-xs text-brand-600 hover:underline font-mono truncate max-w-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
-                aria-label={t('viewProofAria')}
-              >
-                {milestone.proofHash}
-              </a>
+              {proofUrl ? (
+                <a
+                  href={proofUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs text-brand-600 hover:underline font-mono truncate max-w-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                  aria-label={t('viewProofAria')}
+                >
+                  {milestone.proofHash}
+                </a>
+              ) : (
+                <>
+                  <span className="text-xs text-gray-700 font-mono truncate max-w-xs">
+                    {milestone.proofHash}
+                  </span>
+                  <button
+                    onClick={() => copyToClipboard(milestone.proofHash!)}
+                    aria-label="Copy proof to clipboard"
+                    className="text-gray-300 hover:text-gray-600 transition-colors flex-shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
+                  >
+                    <Copy className="w-3 h-3" aria-hidden="true" />
+                  </button>
+                </>
+              )}
             </div>
           )}
 

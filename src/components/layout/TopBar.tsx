@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/lib/hooks/use-auth-store';
 import { useWalletBalance } from '@/lib/hooks/use-wallet-balance';
 import { shortAddress } from '@/lib/utils';
+import { env } from '@/lib/env';
 import { useTranslations } from 'next-intl';
 
 interface TopBarProps {
@@ -14,7 +15,7 @@ interface TopBarProps {
 }
 
 export function TopBar({ onMenuClick }: TopBarProps) {
-  const network = process.env.NEXT_PUBLIC_STELLAR_NETWORK ?? "testnet";
+  const network = env.stellarNetwork;
   const { address, logout, displayName } = useAuthStore();
   const { balances, loading: balancesLoading, error: balancesError } = useWalletBalance(address);
   const t = useTranslations('navigation');

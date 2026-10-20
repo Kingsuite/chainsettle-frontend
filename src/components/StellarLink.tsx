@@ -1,6 +1,7 @@
 'use client';
 
 import { shortAddress } from '@/lib/utils';
+import { env } from '@/lib/env';
 
 type StellarLinkProps = {
   value: string;
@@ -9,7 +10,7 @@ type StellarLinkProps = {
 };
 
 const STELLAR_NETWORK =
-  process.env.NEXT_PUBLIC_STELLAR_NETWORK === 'mainnet' ? 'public' : 'testnet';
+  env.stellarNetwork === 'mainnet' ? 'public' : 'testnet';
 
 const BASE_URL = `https://stellar.expert/explorer/${STELLAR_NETWORK}`;
 
