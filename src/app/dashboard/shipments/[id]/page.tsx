@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { ArrowLeft, RefreshCw, Loader2, Printer, XCircle, Copy } from 'lucide-react';
 import Link from 'next/link';
@@ -13,6 +13,7 @@ import { ShipmentProgress } from '@/components/shipments/ShipmentProgress';
 import { ShipmentComments } from '@/components/shipments/ShipmentComments';
 import { EscrowBalanceCard } from '@/components/shipments/EscrowBalanceCard';
 import { shipmentStatusBadge, timeAgo, deriveUserRole, roleBadge, stroopsToUsdc } from '@/lib/utils';
+import { usePolling } from '@/lib/hooks/use-polling';
 import type { Shipment } from '@/types';
 
 const POLL_INTERVAL_MS = 15_000;
@@ -46,10 +47,8 @@ export default function ShipmentDetailPage() {
   const [cancelStep, setCancelStep] = useState<'signing' | 'syncing' | null>(null);
   const [cancelError, setCancelError] = useState<string | null>(null);
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const loadingRef = useRef<HTMLDivElement>(null);
-
-  const fetchShipment = async (isBackground = false) => {
+  const fetchShipment = useCallback(async (isBackground = false) => {
     if (!isBackground) setLoading(true);
     try {
       const data = await shipmentsApi.get(id);
@@ -63,29 +62,17 @@ export default function ShipmentDetailPage() {
     } finally {
       if (!isBackground) setLoading(false);
     }
-  };
+  }, [id]);
 
-  const startPolling = (currentShipment: Shipment) => {
-    if (currentShipment.status !== "Active") return;
-
-    intervalRef.current = setInterval(async () => {
-      const updated = await fetchShipment(true);
-      if (updated && updated.status !== "Active") {
-        clearInterval(intervalRef.current!);
-        intervalRef.current = null;
-      }
-    }, POLL_INTERVAL_MS);
-  };
+  usePolling(async () => {
+    await fetchShipment(true);
+  }, POLL_INTERVAL_MS, {
+    enabled: shipment?.status === 'Active',
+  });
 
   useEffect(() => {
-    fetchShipment(false).then((data) => {
-      if (data) startPolling(data);
-    });
-
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-    };
-  }, [id]);
+    void fetchShipment(false);
+  }, [fetchShipment]);
 
   useEffect(() => {
     if (!lastUpdated) return;
@@ -310,7 +297,6 @@ export default function ShipmentDetailPage() {
           shipment={shipment}
           userRole={userRole}
           currentUserAddress={address}
-          lastUpdated={lastUpdated}
         />
       </div>
 

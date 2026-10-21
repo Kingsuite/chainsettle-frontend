@@ -10,6 +10,7 @@ import {
   Lock,
 } from 'lucide-react';
 import { commentsApi } from '@/lib/api/services';
+import { usePolling } from '@/lib/hooks/use-polling';
 import {
   deriveUserRole,
   roleBadge,
@@ -24,7 +25,6 @@ interface ShipmentCommentsProps {
   shipment: Shipment;
   userRole: string;
   currentUserAddress?: string | null;
-  lastUpdated?: Date | null;
   pollInterval?: number;
 }
 
@@ -32,7 +32,6 @@ export function ShipmentComments({
   shipment,
   userRole,
   currentUserAddress,
-  lastUpdated,
   pollInterval = 15_000,
 }: ShipmentCommentsProps) {
   const [comments, setComments] = useState<Comment[]>([]);
@@ -88,21 +87,9 @@ export function ShipmentComments({
     fetchComments(false);
   }, [fetchComments]);
 
-  // Synchronize refresh with parent 15s shipment polling
-  useEffect(() => {
-    if (lastUpdated) {
-      fetchComments(true);
-    }
-  }, [lastUpdated, fetchComments]);
-
-  // Fallback interval polling
-  useEffect(() => {
-    const interval = setInterval(() => {
-      fetchComments(true);
-    }, pollInterval);
-
-    return () => clearInterval(interval);
-  }, [fetchComments, pollInterval]);
+  usePolling(() => fetchComments(true), pollInterval, {
+    enabled: shipment.status === 'Active',
+  });
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
