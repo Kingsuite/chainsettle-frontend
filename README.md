@@ -295,6 +295,12 @@ npm run dev
 
 ---
 
+## Contributing
+
+See the [contributor guide](CONTRIBUTING.md) for local setup, checks to run, and the pull request process.
+
+---
+
 ## Environment variables
 
 | Variable | Required | Description |

@@ -143,6 +143,8 @@ export async function signNonce(nonce: string, networkPassphrase: string): Promi
 // Wallet Change Watcher
 // ----------------------------------------------------------------
 
+const WALLET_POLL_INTERVAL_MS = 3000;
+
 /**
  * Subscribe to wallet changes (account switch, network change).
  * Call the returned unsubscribe function on cleanup.
@@ -150,13 +152,65 @@ export async function signNonce(nonce: string, networkPassphrase: string): Promi
 export function watchWallet(
   onChange: (address: string, network: string) => void,
 ): () => void {
-  const interval = setInterval(async () => {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let running = false;
+  let runAgain = false;
+  let stopped = false;
+
+  const isVisible = () => document.visibilityState !== 'hidden';
+
+  const clearTimer = () => {
+    if (timer !== null) {
+      clearTimeout(timer);
+      timer = null;
+    }
+  };
+
+  const schedule = () => {
+    if (stopped || !isVisible()) return;
+    const jitteredInterval = WALLET_POLL_INTERVAL_MS * (0.9 + Math.random() * 0.2);
+    timer = setTimeout(checkWallet, jitteredInterval);
+  };
+
+  const checkWallet = async () => {
+    if (stopped || !isVisible()) return;
+    if (running) {
+      runAgain = true;
+      return;
+    }
+
+    running = true;
+    runAgain = false;
     try {
       const address = await getUserAddress();
       const network = await getWalletNetwork();
       onChange(address, network);
     } catch {}
-  }, 3000);
+    finally {
+      running = false;
+      if (stopped || !isVisible()) return;
+      if (runAgain) {
+        runAgain = false;
+        void checkWallet();
+      } else {
+        schedule();
+      }
+    }
+  };
 
-  return () => clearInterval(interval);
+  const handleVisibilityChange = () => {
+    clearTimer();
+    if (document.visibilityState !== 'hidden') {
+      void checkWallet();
+    }
+  };
+
+  document.addEventListener('visibilitychange', handleVisibilityChange);
+  schedule();
+
+  return () => {
+    stopped = true;
+    clearTimer();
+    document.removeEventListener('visibilitychange', handleVisibilityChange);
+  };
 }
