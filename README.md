@@ -239,6 +239,12 @@ To add a locale:
 3. Load the new message bundle in `src/app/providers.tsx` and pass the selected locale and messages to `NextIntlClientProvider`.
 4. Keep translation keys stable across locale files so components can use the same `useTranslations` calls.
 
+## Content Security Policy
+
+Security headers are configured in `next.config.js`; middleware creates a per-request nonce and attaches the CSP to application responses. `script-src` permits only same-origin scripts and scripts carrying that nonce, so inline event handlers and `javascript:` URLs remain blocked. `style-src` allows inline style attributes because progress indicators use them, and permits the Google Fonts stylesheet and font hosts currently imported by `src/styles/globals.css`.
+
+When adding an external browser service, add only its origin to the narrowest required CSP directive in `src/middleware.ts` (for example, API/RPC calls to `connect-src`, images to `img-src`, or styles/fonts to their respective directives). Prefer an environment-configured origin when it varies by deployment, and document why it is required. Do not add `'unsafe-inline'` to `script-src` or broaden `default-src` to accommodate a service.
+
 ## Key Flows
 
 ### Authentication (Sign-In With Stellar)
